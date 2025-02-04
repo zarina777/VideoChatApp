@@ -31,8 +31,11 @@ const SocketProvider = ({ children }) => {
   const [isUserNotOnline, setIsUserNotOnline] = useState("");
   // Reference to Peer connection
   const connectionRef = useRef(null);
-  // Notifiaction
+  // Notification
   const [notification, setNotification] = useState(false);
+  //Microphone and camera controls
+  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isMicOn, setIsMicOn] = useState(true);
 
   // Request media stream when component mounts
   useEffect(() => {
@@ -197,6 +200,40 @@ const SocketProvider = ({ children }) => {
     setUserStream(null);
     setUser(null);
   }
+  const toggleCamera = async () => {
+    if (!stream) return;
+
+    const videoTrack = stream.getVideoTracks()[0];
+
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      setIsCameraOn(videoTrack.enabled);
+
+      if (connectionRef.current) {
+        const sender = connectionRef.current._pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) {
+          sender.replaceTrack(videoTrack); // Update track for peer
+        }
+      }
+    }
+  };
+  const toggleMic = () => {
+    if (!stream) return;
+
+    const audioTrack = stream.getAudioTracks()[0];
+
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      setIsMicOn(audioTrack.enabled);
+
+      if (connectionRef.current) {
+        const sender = connectionRef.current._pc.getSenders().find((s) => s.track?.kind === "audio");
+        if (sender) {
+          sender.replaceTrack(audioTrack); // Update track for peer
+        }
+      }
+    }
+  };
 
   return (
     <SocketContext.Provider
@@ -220,6 +257,10 @@ const SocketProvider = ({ children }) => {
         rejectCallFn,
         endCallFn,
         notification,
+        toggleCamera,
+        toggleMic,
+        isCameraOn,
+        isMicOn,
       }}
     >
       {children}
