@@ -26,23 +26,32 @@ const io = require("socket.io")(server, {
 const connectedUsers = new Map();
 io.on("connection", (socket) => {
   socket.on("authentificate", (mdb_id) => {
-    connectedUsers.set(mdb_id, { currentId: socket.id, isBusy: false });
+    connectedUsers.set(mdb_id, { currentId: socket.id, busy: false });
     console.log(`User authenticated: ${mdb_id}`);
+    console.log(connectedUsers);
   });
   socket.on("callToUser", ({ callerDBId, callerName, receiverDBId, receiverName, callerStream }) => {
     const targetUser = connectedUsers.get(receiverDBId);
     const currentUser = connectedUsers.get(callerDBId);
     if (targetUser) {
-      if (targetUser.isBusy) {
+      if (targetUser.busy) {
         socket.emit("busyUser", `${receiverName} is currently busy`);
       } else {
         connectedUsers.set(callerDBId, { ...currentUser, busy: true });
-        socket.to(targetUser.currentId).emit("callToYou", { callerDBId, callerName, receiverDBId, receiverName, callerStream });
+        connectedUsers.set(receiverDBId, { ...targetUser, busy: true });
+        socket.to(targetUser.currentId).emit("callToYou", { callerDBId, callerName, callerStream, receiverDBId, receiverName });
       }
     } else {
       socket.emit("UserIsNotOnline", `${receiverName} is not online`);
     }
   });
+
+  socket.on("noResponse", ({ noResFromName, fromDBID, noResToName }) => {
+    let targetUser = connectedUsers.get(fromDBID);
+    socket.emit("noResponse", `No response from ${noResFromName}`);
+    socket.to(targetUser.currentId).emit("missedCall", `You missed a call from ${noResToName}`);
+  });
+
   socket.on("answerCall", ({ responserDBId, responserName, receiverDBId, receiverName, responserStream }) => {
     let targetUser = connectedUsers.get(receiverDBId);
     let currentUser = connectedUsers.get(responserDBId);
@@ -64,16 +73,18 @@ io.on("connection", (socket) => {
     if (targetUser && currentUser) {
       connectedUsers.set(rejecterDBId, { ...currentUser, busy: false });
       connectedUsers.set(receiverDBId, { ...targetUser, busy: false });
-      socket.to(targetUser.currentId).emit("callRejected", `Call rejected by ${rejecterDBId}`);
+      socket.to(targetUser.currentId).emit("callRejected", ` ${rejecterName} rejected the call`);
     }
   });
   socket.on("endCall", ({ enderDBId, enderName, receiverDBId, receiverName }) => {
     let targetUser = connectedUsers.get(receiverDBId);
     let currentUser = connectedUsers.get(enderDBId);
     if (targetUser && currentUser) {
-      socket.to(targetUser.currentId).emit("callEnded", `Call ended by ${enderDBId}`);
+      socket.to(targetUser.currentId).emit("endCall", { enderDBId, enderName });
       connectedUsers.set(enderDBId, { ...currentUser, busy: false });
       connectedUsers.set(receiverDBId, { ...targetUser, busy: false });
+    } else {
+      socket.to(targetUser.currentId).emit("UserIsNotOnline", `${enderName} or ${receiverName} is not online`);
     }
   });
   socket.on("disconnect", () => {

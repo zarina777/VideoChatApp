@@ -12,6 +12,9 @@ export default defineConfig({
   },
   define: {
     global: "window",
-    process: { env: {} }, // Define process for browser
+    process: { env: {} }, // Ensure process is defined
+  },
+  optimizeDeps: {
+    include: ["process", "buffer"],
   },
 });

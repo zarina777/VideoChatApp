@@ -16,15 +16,13 @@ const SocketProvider = ({ children }) => {
   //target user's video stream is kept
   const [userStream, setUserStream] = useState(null);
   //call is on the way
-  const [callOnTheWay, setCallOnTheWay] = useState(null);
-  //call is received
-  const [callIsReceived, setCallIsReceived] = useState(null);
+  const [callOnTheWay, setCallOnTheWay] = useState("");
   //call is rejected
   const [callIsRejected, setCallIsRejected] = useState("");
   //call is accepted
   const [callIsAccepted, setCallIsAccepted] = useState(null);
   //call ended
-  const [callIsEnded, setCallIsEnded] = useState(null);
+  const [callIsEnded, setCallIsEnded] = useState("");
   //call is missed
   const [callIsMissed, setCallIsMissed] = useState(null);
   //if user is busy
@@ -33,6 +31,8 @@ const SocketProvider = ({ children }) => {
   const [isUserNotOnline, setIsUserNotOnline] = useState("");
   // Reference to Peer connection
   const connectionRef = useRef(null);
+  // Notifiaction
+  const [notification, setNotification] = useState(false);
 
   // Request media stream when component mounts
   useEffect(() => {
@@ -42,18 +42,36 @@ const SocketProvider = ({ children }) => {
         setStream(newStream);
       } catch (error) {
         console.error("Error accessing media devices:", error.message);
-        alert("Unable to access camera or microphone.");
       }
     };
     getUserMedia();
     const handleIncomingCall = ({ callerDBId, callerName, receiverDBId, receiverName, callerStream }) => {
-      setUser({ callerDBId, callerName, receiverDBId, receiverName, callerStream });
+      setUser({ id: callerDBId, name: callerName, fromID: receiverDBId, fromName: receiverName, stream: callerStream });
+      setNotification(true);
+    };
+    const handleEndCall = (message) => {
+      if (connectionRef.current) {
+        connectionRef.current.removeAllListeners();
+        connectionRef.current.destroy();
+        connectionRef.current = null;
+      }
+      if (stream) {
+        setStream(null);
+      }
+      // Reset state related to the call
+      setCallIsEnded(`${message.enderName} ended the call`);
+      setTimeout(() => {
+        setCallIsEnded("");
+      }, 2000);
+      setUser(null);
+      setUserStream(null);
     };
     // Listen for incoming calls
     socket.on("callToYou", handleIncomingCall);
-
+    socket.on("endCall", handleEndCall);
     return () => {
       socket.off("callToYou", handleIncomingCall);
+      socket.off("endCall", handleEndCall);
     };
   }, []);
 
@@ -70,7 +88,6 @@ const SocketProvider = ({ children }) => {
         setStream(newStream);
       } catch (error) {
         console.error("Error accessing media devices:", error.message);
-        alert("Unable to access camera or microphone.");
         return;
       }
     }
@@ -85,13 +102,13 @@ const SocketProvider = ({ children }) => {
 
     peer.on("signal", (data) => {
       socket.emit("callToUser", {
-        callerDBId: me._id,
-        callerName: me.name,
+        callerDBId: me?._id,
+        callerName: me?.name,
         receiverDBId,
         receiverName,
         callerStream: data,
       });
-      setCallOnTheWay(true);
+      setCallOnTheWay(`Wait for ${receiverName}'s response`);
     });
 
     peer.on("stream", (remoteStream) => {
@@ -100,13 +117,6 @@ const SocketProvider = ({ children }) => {
 
     peer.on("error", (error) => {
       console.error("Peer error:", error);
-      alert("Failed to establish peer connection.");
-    });
-
-    peer.on("close", () => {
-      connectionRef.current = null;
-      setCallOnTheWay(false);
-      alert("Connection closed");
     });
 
     socket.once("busyUser", (message) => {
@@ -117,24 +127,26 @@ const SocketProvider = ({ children }) => {
     });
 
     socket.once("UserIsNotOnline", (message) => {
+      setCallOnTheWay("");
+
       setIsUserNotOnline(message);
       setTimeout(() => {
         setIsUserNotOnline("");
       }, 3000);
     });
-    socket.once("callAccepted", (message) => {
+    socket.once("callAccepted", ({ responserDBId, responserName, receiverDBId, receiverName, responserStream }) => {
+      setCallOnTheWay("");
       setCallIsAccepted(true);
-      setUser(message);
+      setUser({ id: responserDBId, name: responserName, stream: responserStream, fromID: receiverDBId, fromName: receiverName });
+      peer.signal(responserStream);
     });
     socket.once("callRejected", (message) => {
-      if (connectionRef.current) {
-        connectionRef.current.destroy();
-        connectionRef.current = null;
-      }
+      setCallOnTheWay("");
       setCallIsRejected(message);
+
       setTimeout(() => {
         setCallIsRejected("");
-      }, 3000);
+      }, 2000);
     });
   };
 
@@ -150,15 +162,16 @@ const SocketProvider = ({ children }) => {
       socket.emit("answerCall", {
         responserDBId: me._id,
         responserName: me.name,
-        receiverDBId: user.receiverDBId,
-        receiverName: user.receiverName,
+        receiverDBId: user.id,
+        receiverName: user.name,
         responserStream: data,
       });
     });
     peer.on("stream", (remoteStream) => {
       setUserStream(remoteStream);
     });
-    peer.signal(user.callerStream);
+    peer.signal(user.stream);
+    setNotification(false);
   }
 
   //reject a call function
@@ -166,17 +179,24 @@ const SocketProvider = ({ children }) => {
     socket.emit("rejectCall", {
       rejecterDBId: me._id,
       rejecterName: me.name,
-      receiverDBId: user.receiver,
-      receiverName: user.receiverName,
+      receiverDBId: user.id,
+      receiverName: user.name,
     });
+
+    setUser(null);
+    setNotification(false);
+  }
+
+  //end a call function
+  function endCallFn() {
     if (connectionRef.current) {
       connectionRef.current.destroy();
       connectionRef.current = null;
     }
+    socket.emit("endCall", { enderDBId: me._id, enderName: me.name, receiverDBId: user.id, receiverName: user.name });
+    setUserStream(null);
+    setUser(null);
   }
-
-  //end a call function
-  function endCallFn() {}
 
   return (
     <SocketContext.Provider
@@ -189,7 +209,6 @@ const SocketProvider = ({ children }) => {
         stream,
         userStream,
         callOnTheWay,
-        callIsReceived,
         callIsRejected,
         callIsAccepted,
         callIsEnded,
@@ -200,6 +219,7 @@ const SocketProvider = ({ children }) => {
         answerCallFn,
         rejectCallFn,
         endCallFn,
+        notification,
       }}
     >
       {children}

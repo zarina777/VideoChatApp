@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
-import { SocketContext } from "../context";
+import { SocketContext } from "../Context";
 import api from "../api";
 const Login = () => {
   const [users, setUsers] = useState([]);
@@ -26,7 +26,7 @@ const Login = () => {
       .get(`/users/${selectedUserId}`) // Use ID in the query
       .then((response) => {
         setMe(response.data);
-        socket.emit("authenticate", response.data._id);
+        socket.emit("authentificate", response.data._id);
       })
       .catch((error) => {
         console.error("There was an error making the request:", error);
